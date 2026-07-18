@@ -28,6 +28,7 @@ const incidentSchema = new Schema({
   division: { type: String, required: true, index: true, trim: true },
   supplier: { type: String, required: true, index: true, trim: true },
   component: { type: String, required: true, trim: true },
+  observation: { type: String, default: "", trim: true },
   severity: { type: String, enum: ["High", "Medium", "Low"], required: true },
   status: { type: String, enum: ["Open", "In progress", "Review", "Closed"], default: "Open", index: true },
   createdByClerkUserId: { type: String, required: true, index: true },
@@ -35,13 +36,46 @@ const incidentSchema = new Schema({
 incidentSchema.index({ createdByClerkUserId: 1, ncrNumber: 1 }, { unique: true });
 
 const Incident = mongoose.model("Incident", incidentSchema);
+const investigationSchema = new Schema({
+  threadId: { type: String, required: true, unique: true, index: true },
+  incidentId: { type: String, required: true, index: true },
+  problem: { type: String, required: true },
+  division: { type: String, required: true },
+  evidenceStatus: { type: String, required: true },
+  problemSummary: { type: String, required: true },
+  generationMethod: { type: String, required: true },
+  generatedAt: { type: Date, required: true },
+  containmentChecks: [{ type: String }],
+  rootCauseChecks: [{ type: String }],
+  citations: [{ sourceId: String, title: String, relevance: Number, excerpt: String }],
+  recommendedNextAction: { type: String, required: true },
+  disclaimer: { type: String, required: true },
+  createdByClerkUserId: { type: String, required: true, index: true },
+}, { timestamps: true, versionKey: false });
+investigationSchema.index({ createdByClerkUserId: 1, createdAt: -1 });
+
+const Investigation = mongoose.model("Investigation", investigationSchema);
 const incidentInput = z.object({
   ncrNumber: z.string().trim().min(3).max(40),
   title: z.string().trim().min(8).max(240),
   division: z.string().trim().min(2).max(100),
   supplier: z.string().trim().min(2).max(160),
   component: z.string().trim().min(2).max(160),
+  observation: z.string().trim().max(2000).default(""),
   severity: z.enum(["High", "Medium", "Low"]),
+});
+const aiInvestigation = z.object({
+  thread_id: z.string().uuid(),
+  incident_id: z.string(),
+  evidence_status: z.string(),
+  problem_summary: z.string(),
+  generation_method: z.string(),
+  generated_at: z.string().datetime(),
+  containment_checks: z.array(z.string()),
+  root_cause_checks: z.array(z.string()),
+  citations: z.array(z.object({ source_id: z.string(), title: z.string(), relevance: z.number(), excerpt: z.string() })),
+  recommended_next_action: z.string(),
+  disclaimer: z.string(),
 });
 const investigationInput = z.object({
   incidentId: z.string().trim().min(3).max(40),
@@ -113,8 +147,48 @@ app.post("/api/v1/investigations", async (request, response, next) => {
       body: JSON.stringify({ incident_id: parsed.data.incidentId, problem: parsed.data.problem, division: parsed.data.division }),
       signal: AbortSignal.timeout(15_000),
     });
-    const body = await upstream.text();
-    response.status(upstream.status).type(upstream.headers.get("content-type") ?? "application/json").send(body);
+    const body: unknown = await upstream.json();
+    if (!upstream.ok) {
+      response.status(upstream.status).json(body);
+      return;
+    }
+    const generated = aiInvestigation.parse(body);
+    const investigation = await Investigation.create({
+      threadId: generated.thread_id,
+      incidentId: generated.incident_id,
+      problem: parsed.data.problem,
+      division: parsed.data.division,
+      evidenceStatus: generated.evidence_status,
+      problemSummary: generated.problem_summary,
+      generationMethod: generated.generation_method,
+      generatedAt: generated.generated_at,
+      containmentChecks: generated.containment_checks,
+      rootCauseChecks: generated.root_cause_checks,
+      citations: generated.citations.map((citation) => ({
+        sourceId: citation.source_id,
+        title: citation.title,
+        relevance: citation.relevance,
+        excerpt: citation.excerpt,
+      })),
+      recommendedNextAction: generated.recommended_next_action,
+      disclaimer: generated.disclaimer,
+      createdByClerkUserId: userId,
+    });
+    response.status(201).json({ data: investigation });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/v1/investigations", async (request, response, next) => {
+  try {
+    const userId = authenticatedUser(request, response);
+    if (!userId) return;
+    const investigations = await Investigation.find({ createdByClerkUserId: userId })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+    response.json({ data: investigations });
   } catch (error) {
     next(error);
   }

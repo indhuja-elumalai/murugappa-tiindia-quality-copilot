@@ -26,6 +26,9 @@ def test_investigation_is_grounded() -> None:
     assert response.status_code == 200
     assert payload["evidence_status"] == "grounded-draft"
     assert payload["citations"]
+    assert payload["citations"][0]["excerpt"]
+    assert "Qdrant vector retrieval" in payload["generation_method"]
+    assert payload["recommended_next_action"]
     assert "engineer review" in payload["disclaimer"]
 
 

@@ -1,4 +1,5 @@
 from collections import Counter
+from datetime import datetime, timezone
 import hashlib
 from math import sqrt
 import os
@@ -60,6 +61,25 @@ DOCUMENTS = [
         "text": "For pitch deviation, verify punch wear, strip thickness, press setup, gauge calibration, and heat-treatment distortion before releasing the lot.",
     },
 ]
+
+EVIDENCE_GUIDANCE = {
+    "SOP-TUBE-014": {
+        "containment": "Quarantine the affected coil, finished lot, and linked material certificates.",
+        "root_cause": "Compare material chemistry, weld current stability, roll alignment, and seam-temperature records.",
+    },
+    "WI-WELD-008": {
+        "containment": "Preserve seam measurements and the mill settings recorded for every suspect batch.",
+        "root_cause": "Verify mill speed, squeeze pressure, inspection frequency, and gauge calibration status.",
+    },
+    "NCR-0918": {
+        "containment": "Inspect adjacent production lots for progressive guide-roll movement.",
+        "root_cause": "Test whether guide-roll misalignment progressed between setup verification and final inspection.",
+    },
+    "SOP-CHAIN-021": {
+        "containment": "Hold the affected chain lot and preserve dimensional inspection results.",
+        "root_cause": "Check punch wear, strip thickness, press setup, gauge calibration, and heat-treatment distortion.",
+    },
+}
 
 QDRANT_URL = os.getenv("QDRANT_URL", "").rstrip("/")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
@@ -158,15 +178,20 @@ class Citation(BaseModel):
     source_id: str
     title: str
     relevance: float
+    excerpt: str
 
 
 class InvestigationResponse(BaseModel):
     thread_id: str
     incident_id: str
     evidence_status: str
+    problem_summary: str
+    generation_method: str
+    generated_at: str
     containment_checks: list[str]
     root_cause_checks: list[str]
     citations: list[Citation]
+    recommended_next_action: str
     disclaimer: str
 
 
@@ -182,20 +207,20 @@ async def investigate(request: InvestigationRequest) -> InvestigationResponse:
     if not relevant:
         raise HTTPException(status_code=422, detail="Insufficient approved evidence for a grounded draft.")
 
+    containment_checks = [EVIDENCE_GUIDANCE[item["id"]]["containment"] for item in relevant if item["id"] in EVIDENCE_GUIDANCE]
+    root_cause_checks = [EVIDENCE_GUIDANCE[item["id"]]["root_cause"] for item in relevant if item["id"] in EVIDENCE_GUIDANCE]
+    top_source = relevant[0]
+
     return InvestigationResponse(
         thread_id=str(uuid4()),
         incident_id=request.incident_id,
         evidence_status="grounded-draft",
-        containment_checks=[
-            "Quarantine and identify the affected lot.",
-            "Confirm gauge calibration and inspection sampling records.",
-            "Preserve process parameters before making adjustments.",
-        ],
-        root_cause_checks=[
-            "Compare material and process records with the approved specification.",
-            "Check equipment setup, alignment, wear, and calibration.",
-            "Reproduce the deviation under controlled engineering review.",
-        ],
-        citations=[Citation(source_id=item["id"], title=item["title"], relevance=item["score"]) for item in relevant],
+        problem_summary=f"{request.incident_id} was compared with {len(relevant)} approved evidence sources for {request.division}.",
+        generation_method="Qdrant vector retrieval ranked approved procedures and closed cases; deterministic 8D checks were assembled only from the retrieved evidence.",
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        containment_checks=containment_checks,
+        root_cause_checks=root_cause_checks,
+        citations=[Citation(source_id=item["id"], title=item["title"], relevance=item["score"], excerpt=item["text"]) for item in relevant],
+        recommended_next_action=f"Review {top_source['id']} with the process owner and record measured evidence against each proposed check.",
         disclaimer="Draft for qualified engineer review; not an approved root-cause decision.",
     )
