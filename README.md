@@ -65,6 +65,8 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+Authentication requires a Clerk application. Copy `.env.example` to `.env.local` and replace the two Clerk placeholders. Without keys, the interface runs in an explicitly labelled portfolio demo mode.
+
 Build and test:
 
 ```bash
@@ -107,6 +109,8 @@ No paid model, extension, database, or hosting plan is required for local develo
 - The design avoids sending company documents to external model providers by default.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/responsible-ai.md](docs/responsible-ai.md) for design details and planned production controls.
+
+See [docs/deployment.md](docs/deployment.md) for the Vercel, Clerk, Render, MongoDB Atlas, and Qdrant deployment topology and the exact environment values required.
 
 ## Roadmap
 
