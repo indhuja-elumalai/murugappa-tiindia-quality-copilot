@@ -9,6 +9,23 @@ test("ships the complete quality workflow", async () => {
   assert.match(dashboard, /8D Investigation Copilot/);
   assert.match(dashboard, /Create non-conformance/);
   assert.match(dashboard, /ProductWalkthrough/);
+  for (const destination of ["Non-conformance", "8D investigations", "Supplier quality", "Knowledge base", "Quality reports", "Settings"]) {
+    assert.match(dashboard, new RegExp(destination));
+  }
+  assert.match(dashboard, /How was this generated/);
+  assert.match(dashboard, /Open saved investigation/);
+});
+
+test("persists auditable evidence-backed investigations", async () => {
+  const [qualityApi, aiService] = await Promise.all([
+    readFile(new URL("../services/api/src/server.ts", import.meta.url), "utf8"),
+    readFile(new URL("../services/ai/app/main.py", import.meta.url), "utf8"),
+  ]);
+  assert.match(qualityApi, /Investigation\.create/);
+  assert.match(qualityApi, /createdByClerkUserId/);
+  assert.match(qualityApi, /generationMethod/);
+  assert.match(aiService, /Qdrant vector retrieval/);
+  assert.match(aiService, /excerpt=item\["text"\]/);
 });
 
 test("protects the app with Clerk and persists onboarding", async () => {
