@@ -200,6 +200,11 @@ def health() -> dict[str, str]:
     return {"status": "healthy", "retriever": "qdrant" if QDRANT_URL else "local-evidence-demo"}
 
 
+@app.get("/api/v1/knowledge", dependencies=[Depends(verify_internal_api_key)])
+def knowledge() -> dict[str, list[dict]]:
+    return {"data": DOCUMENTS}
+
+
 @app.post("/api/v1/investigations", response_model=InvestigationResponse, dependencies=[Depends(verify_internal_api_key)])
 async def investigate(request: InvestigationRequest) -> InvestigationResponse:
     matches = await retrieve_from_qdrant(f"{request.division} {request.problem}")

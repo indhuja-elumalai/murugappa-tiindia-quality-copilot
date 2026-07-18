@@ -50,6 +50,10 @@ const investigationSchema = new Schema({
   citations: [{ sourceId: String, title: String, relevance: Number, excerpt: String }],
   recommendedNextAction: { type: String, required: true },
   disclaimer: { type: String, required: true },
+  workflowStage: { type: Number, min: 0, max: 4, default: 2 },
+  completedChecks: [{ type: String }],
+  engineerNotes: { type: String, default: "", trim: true },
+  reviewedAt: { type: Date },
   createdByClerkUserId: { type: String, required: true, index: true },
 }, { timestamps: true, versionKey: false });
 investigationSchema.index({ createdByClerkUserId: 1, createdAt: -1 });
@@ -81,6 +85,12 @@ const investigationInput = z.object({
   incidentId: z.string().trim().min(3).max(40),
   problem: z.string().trim().min(12).max(2000),
   division: z.string().trim().min(2).max(100),
+});
+const incidentStatusInput = z.object({ status: z.enum(["Open", "In progress", "Review", "Closed"]) });
+const investigationProgressInput = z.object({
+  workflowStage: z.number().int().min(0).max(4),
+  completedChecks: z.array(z.string().min(1).max(500)).max(20),
+  engineerNotes: z.string().trim().max(4000),
 });
 
 const app = express();
@@ -127,6 +137,30 @@ app.post("/api/v1/incidents", async (request, response, next) => {
     }
     const incident = await Incident.create({ ...parsed.data, createdByClerkUserId: userId });
     response.status(201).json({ data: incident });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/v1/incidents/:ncrNumber", async (request, response, next) => {
+  try {
+    const userId = authenticatedUser(request, response);
+    if (!userId) return;
+    const parsed = incidentStatusInput.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: "invalid_incident_status", details: parsed.error.issues });
+      return;
+    }
+    const incident = await Incident.findOneAndUpdate(
+      { ncrNumber: request.params.ncrNumber, createdByClerkUserId: userId },
+      { status: parsed.data.status },
+      { new: true, runValidators: true },
+    ).lean();
+    if (!incident) {
+      response.status(404).json({ error: "incident_not_found" });
+      return;
+    }
+    response.json({ data: incident });
   } catch (error) {
     next(error);
   }
@@ -189,6 +223,65 @@ app.get("/api/v1/investigations", async (request, response, next) => {
       .limit(100)
       .lean();
     response.json({ data: investigations });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/v1/investigations/:id", async (request, response, next) => {
+  try {
+    const userId = authenticatedUser(request, response);
+    if (!userId) return;
+    if (!mongoose.isValidObjectId(request.params.id)) {
+      response.status(400).json({ error: "invalid_investigation_id" });
+      return;
+    }
+    const parsed = investigationProgressInput.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: "invalid_investigation_progress", details: parsed.error.issues });
+      return;
+    }
+    const investigation = await Investigation.findOneAndUpdate(
+      { _id: request.params.id, createdByClerkUserId: userId },
+      { ...parsed.data, reviewedAt: new Date() },
+      { new: true, runValidators: true },
+    ).lean();
+    if (!investigation) {
+      response.status(404).json({ error: "investigation_not_found" });
+      return;
+    }
+    response.json({ data: investigation });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/v1/knowledge", async (request, response, next) => {
+  try {
+    const userId = authenticatedUser(request, response);
+    if (!userId) return;
+    const upstream = await fetch(`${environment.AI_SERVICE_URL}/api/v1/knowledge`, {
+      headers: { "X-Internal-API-Key": environment.AI_INTERNAL_API_KEY },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body: unknown = await upstream.json();
+    response.status(upstream.status).json(body);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/v1/system/health", async (request, response, next) => {
+  try {
+    const userId = authenticatedUser(request, response);
+    if (!userId) return;
+    const aiResponse = await fetch(`${environment.AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(5_000) });
+    const aiHealth: unknown = await aiResponse.json();
+    response.status(aiResponse.ok ? 200 : 503).json({
+      status: aiResponse.ok && mongoose.connection.readyState === 1 ? "healthy" : "degraded",
+      services: { web: "connected", database: mongoose.connection.readyState === 1 ? "connected" : "unavailable", ai: aiResponse.ok ? "connected" : "unavailable", vector: typeof aiHealth === "object" && aiHealth !== null && "retriever" in aiHealth ? aiHealth.retriever : "unknown" },
+      checkedAt: new Date().toISOString(),
+    });
   } catch (error) {
     next(error);
   }
