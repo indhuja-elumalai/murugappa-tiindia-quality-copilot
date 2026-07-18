@@ -1,0 +1,18 @@
+services:
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - quality_mongo:/data/db
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    ports:
+      - "6333:6333"
+    volumes:
+      - quality_vectors:/qdrant/storage
+
+volumes:
+  quality_mongo:
+  quality_vectors:
