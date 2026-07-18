@@ -12,14 +12,16 @@ test("ships the complete quality workflow", async () => {
 });
 
 test("protects the app with Clerk and persists onboarding", async () => {
-  const [layout, proxy, onboarding, walkthrough] = await Promise.all([
+  const [layout, page, proxy, onboarding, walkthrough] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../proxy.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/onboarding/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/ProductWalkthrough.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(layout, /ClerkProvider/);
-  assert.match(proxy, /auth\.protect/);
+  assert.match(proxy, /clerkMiddleware/);
+  assert.match(page, /auth\.protect/);
   assert.match(onboarding, /updateUserMetadata/);
   assert.match(walkthrough, /Skip tour/);
   assert.match(walkthrough, /qualityCopilotOnboarded/);
