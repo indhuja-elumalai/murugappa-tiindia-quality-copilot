@@ -9,6 +9,8 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
       - key: NODE_ENV
         value: production
       - key: MONGODB_URL
@@ -34,6 +36,8 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.7
       - key: AI_CORS_ORIGIN
         sync: false
       - key: AI_INTERNAL_API_KEY
