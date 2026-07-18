@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { SidebarIdentity, TopbarAccount } from "./AuthControls";
+import { ProductWalkthrough } from "./ProductWalkthrough";
 
 type Incident = {
   id: string;
@@ -34,6 +36,31 @@ export function QualityDashboard() {
   const [severity, setSeverity] = useState("All severity");
   const [modalOpen, setModalOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [aiInsight, setAiInsight] = useState("Three similar cases indicate checking incoming material chemistry, weld current stability, and roll alignment before changing process parameters.");
+  const [aiSources, setAiSources] = useState(["SOP-TUBE-014", "WI-WELD-008", "2 similar NCRs"]);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/incidents", { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (!payload?.data?.length) return;
+        const remote = payload.data.map((incident: Record<string, string>) => ({
+          id: incident.ncrNumber,
+          title: incident.title,
+          division: incident.division,
+          supplier: incident.supplier,
+          component: incident.component,
+          severity: incident.severity,
+          status: incident.status,
+        })) as Incident[];
+        setIncidents(remote);
+        setSelectedId(remote[0].id);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   const selected = incidents.find((incident) => incident.id === selectedId) ?? incidents[0];
   const visible = useMemo(() => incidents.filter((incident) => {
@@ -46,7 +73,7 @@ export function QualityDashboard() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
-  function createIncident(event: FormEvent<HTMLFormElement>) {
+  async function createIncident(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const next: Incident = {
@@ -58,10 +85,44 @@ export function QualityDashboard() {
       severity: String(data.get("severity")) as Incident["severity"],
       status: "Open",
     };
-    setIncidents((current) => [next, ...current]);
-    setSelectedId(next.id);
+    let saved = next;
+    try {
+      const response = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ncrNumber: next.id, title: next.title, division: next.division, supplier: next.supplier, component: next.component, severity: next.severity }),
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        saved = { ...next, status: payload.data.status ?? "Open" };
+      }
+    } catch {
+      // The portfolio demo remains functional with its synthetic local dataset.
+    }
+    setIncidents((current) => [saved, ...current]);
+    setSelectedId(saved.id);
     setModalOpen(false);
-    flash(`${next.id} created and routed for triage`);
+    flash(`${saved.id} created and routed for triage`);
+  }
+
+  async function analyzeSelected() {
+    setAiLoading(true);
+    try {
+      const response = await fetch("/api/investigations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incidentId: selected.id, problem: selected.title, division: selected.division }),
+      });
+      if (!response.ok) throw new Error("AI service unavailable");
+      const payload = await response.json();
+      setAiInsight(payload.root_cause_checks.join(" "));
+      setAiSources(payload.citations.map((citation: { source_id: string }) => citation.source_id));
+      flash("Evidence-backed root cause draft generated");
+    } catch {
+      flash("Demo evidence retained — connect the AI service for live retrieval");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   return (
@@ -73,19 +134,19 @@ export function QualityDashboard() {
         <div className="nav-label">System</div>
         <button className="nav-item"><span className="nav-icon">⚙</span><span>Settings</span></button>
         <div className="sidebar-note"><strong>Responsible AI</strong><p>Copilot suggestions require engineer review before they enter an approved 8D report.</p></div>
-        <div className="user-mini"><div className="avatar">IE</div><div><b>Indhuja Elumalai</b><span>Quality engineering</span></div></div>
+        <SidebarIdentity />
       </aside>
 
       <main className="main">
         <header className="topbar">
           <div className="crumb"><button className="icon-button mobile-menu" aria-label="Open menu">☰</button><span className="desktop-copy">Quality operations&nbsp; / &nbsp;</span><strong>Command center</strong></div>
-          <div className="top-actions"><input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search NCR, supplier or component" aria-label="Search incidents"/><button className="icon-button" aria-label="Notifications">◉</button><button className="primary" onClick={() => setModalOpen(true)}>＋ <span className="desktop-copy">New NCR</span></button></div>
+          <div className="top-actions"><input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search NCR, supplier or component" aria-label="Search incidents"/><button className="icon-button" aria-label="Notifications">◉</button><button className="primary" data-tour="new-ncr" onClick={() => setModalOpen(true)}>＋ <span className="desktop-copy">New NCR</span></button><TopbarAccount /></div>
         </header>
 
         <div className="content">
           <div className="hero-row"><div><p className="eyebrow">Operational excellence</p><h1>Quality command center</h1><p className="hero-copy">A unified view of supplier quality, investigations, and preventive action.</p></div><span className="updated">Portfolio prototype · synthetic data · 18 Jul 2026</span></div>
 
-          <section className="metrics" aria-label="Quality metrics">
+          <section className="metrics" data-tour="quality-pulse" aria-label="Quality metrics">
             <Metric label="Open non-conformances" value={String(incidents.length + 7)} foot="3 require attention" icon="N" />
             <Metric label="On-time 8D closure" value="91.4%" foot="↑ 4.8% vs last month" icon="8D" good />
             <Metric label="Supplier PPM" value="186" foot="↓ 22 from previous period" icon="P" good />
@@ -93,7 +154,7 @@ export function QualityDashboard() {
           </section>
 
           <div className="grid">
-            <section className="panel">
+            <section className="panel" data-tour="incidents">
               <div className="panel-head"><div><h2>Active non-conformances</h2><p>Prioritized by severity and customer impact</p></div><div className="filter-row"><select className="filter" value={severity} onChange={(e) => setSeverity(e.target.value)} aria-label="Filter by severity"><option>All severity</option><option>High</option><option>Medium</option><option>Low</option></select><button className="filter" onClick={() => setQuery("")}>Clear filters</button></div></div>
               <div className="incident-list">
                 {visible.map((incident) => <button key={incident.id} className={`incident-row ${selectedId === incident.id ? "selected" : ""}`} onClick={() => setSelectedId(incident.id)}>
@@ -103,13 +164,13 @@ export function QualityDashboard() {
               </div>
             </section>
 
-            <aside className="panel copilot">
+            <aside className="panel copilot" data-tour="copilot">
               <div className="copilot-head"><div className="copilot-headline"><div className="ai-mark">AI</div><div><h2>8D Investigation Copilot</h2><p>Grounded in approved procedures and past cases</p></div><div className="ai-status"><span className="status-dot"/>Ready</div></div></div>
               <div className="selected-incident"><small>Working on · {selected.id}</small><b>{selected.title}</b></div>
-              <div className="insight">Three similar cases indicate checking incoming material chemistry, weld current stability, and roll alignment before changing process parameters.</div>
-              <div className="source-row"><span className="source">SOP-TUBE-014</span><span className="source">WI-WELD-008</span><span className="source">2 similar NCRs</span></div>
+              <div className="insight">{aiInsight}</div>
+              <div className="source-row">{aiSources.map((source) => <span className="source" key={source}>{source}</span>)}</div>
               <div className="steps">{steps.map((step, index) => <div className={`step ${index < 2 ? "done" : index === 2 ? "active" : ""}`} key={step}><span className="step-dot">{index < 2 ? "✓" : index + 1}</span><span>{step}</span></div>)}</div>
-              <button className="copilot-action" onClick={() => flash("Evidence-backed root cause draft generated")}>Continue root cause analysis →</button>
+              <button className="copilot-action" disabled={aiLoading} onClick={analyzeSelected}>{aiLoading ? "Retrieving approved evidence…" : "Continue root cause analysis →"}</button>
             </aside>
           </div>
 
@@ -122,6 +183,7 @@ export function QualityDashboard() {
 
       {modalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setModalOpen(false); }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="new-ncr-title"><div className="modal-head"><div><p className="eyebrow">Quality intake</p><h2 id="new-ncr-title">Create non-conformance</h2></div><button className="close" onClick={() => setModalOpen(false)} aria-label="Close dialog">×</button></div><form onSubmit={createIncident}><div className="form"><div className="field full"><label htmlFor="title">Problem statement</label><input id="title" name="title" required placeholder="Describe the observed deviation clearly"/></div><div className="field"><label htmlFor="division">Division</label><select id="division" name="division"><option>Tube Products</option><option>Industrial Chains</option><option>Metal Forming</option><option>TI Cycles</option></select></div><div className="field"><label htmlFor="severity">Severity</label><select id="severity" name="severity"><option>High</option><option>Medium</option><option>Low</option></select></div><div className="field"><label htmlFor="supplier">Supplier / source</label><input id="supplier" name="supplier" required placeholder="Supplier or internal process"/></div><div className="field"><label htmlFor="component">Component</label><input id="component" name="component" required placeholder="Part or assembly name"/></div><div className="field full"><label htmlFor="details">Immediate observation</label><textarea id="details" name="details" placeholder="Include specification, measured value, lot and containment status"/></div></div><div className="modal-foot"><button type="button" className="secondary" onClick={() => setModalOpen(false)}>Cancel</button><button className="primary" type="submit">Create and start triage</button></div></form></div></div>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
+      <ProductWalkthrough />
     </div>
   );
 }
