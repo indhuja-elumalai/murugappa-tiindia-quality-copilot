@@ -42,3 +42,10 @@ def test_investigation_rejects_missing_service_credential() -> None:
         },
     )
     assert response.status_code == 401
+
+
+def test_knowledge_returns_approved_evidence() -> None:
+    response = client.get("/api/v1/knowledge", headers={"X-Internal-API-Key": "development-only"})
+    assert response.status_code == 200
+    assert len(response.json()["data"]) >= 4
+    assert all(document["id"] and document["text"] for document in response.json()["data"])

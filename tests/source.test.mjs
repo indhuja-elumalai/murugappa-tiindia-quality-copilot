@@ -28,6 +28,26 @@ test("persists auditable evidence-backed investigations", async () => {
   assert.match(aiService, /excerpt=item\["text"\]/);
 });
 
+test("implements every interactive operational workflow", async () => {
+  const [dashboard, qualityApi, incidentPatch, investigationPatch, knowledgeRoute, healthRoute] = await Promise.all([
+    readFile(new URL("../app/QualityDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../services/api/src/server.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/incidents/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/investigations/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/knowledge/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/system/health/route.ts", import.meta.url), "utf8"),
+  ]);
+  for (const control of ["Update status", "Save review progress", "Export CSV", "Print report", "Test all connections", "Quality notifications", "Done reviewing"]) {
+    assert.match(dashboard, new RegExp(control));
+  }
+  assert.match(qualityApi, /app\.patch\("\/api\/v1\/incidents/);
+  assert.match(qualityApi, /app\.patch\("\/api\/v1\/investigations/);
+  assert.match(incidentPatch, /method: "PATCH"/);
+  assert.match(investigationPatch, /method: "PATCH"/);
+  assert.match(knowledgeRoute, /\/api\/v1\/knowledge/);
+  assert.match(healthRoute, /\/api\/v1\/system\/health/);
+});
+
 test("protects the app with Clerk and persists onboarding", async () => {
   const [layout, page, proxy, onboarding, walkthrough] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),

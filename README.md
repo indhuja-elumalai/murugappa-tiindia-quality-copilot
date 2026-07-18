@@ -112,6 +112,8 @@ See [docs/architecture.md](docs/architecture.md) and [docs/responsible-ai.md](do
 
 See [docs/deployment.md](docs/deployment.md) for the Vercel, Clerk, Render, MongoDB Atlas, and Qdrant deployment topology and the exact environment values required.
 
+Before merging or deploying, complete [docs/acceptance-test-checklist.md](docs/acceptance-test-checklist.md), which covers every navigation item, button, modal, persisted workflow, export, authentication boundary, and responsive control.
+
 ## Roadmap
 
 - persist NCRs and audit events through the Express/MongoDB service;
