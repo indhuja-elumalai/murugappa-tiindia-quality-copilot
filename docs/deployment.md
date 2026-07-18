@@ -42,6 +42,15 @@ This topology is suitable for a recruiter-facing portfolio demonstration. Free R
 
 No webhook is required for the walkthrough. Add `CLERK_WEBHOOK_SIGNING_SECRET` only if user records are later synchronized into MongoDB.
 
+## MongoDB Atlas network access
+
+The quality API cannot persist NCRs or investigations until Atlas accepts traffic from its runtime:
+
+1. Open Atlas → **Security** → **Network Access**.
+2. For local testing, add the current public IP address as a `/32` entry.
+3. For a free Render demonstration, add the outbound ranges shown by Render when available. If the free service has no stable outbound range, `0.0.0.0/0` can be used temporarily for a portfolio demo only; keep a strong database password and a least-privilege database user.
+4. For a company deployment, use fixed egress or private networking and restrict Atlas to those addresses.
+
 ## Verification checklist
 
 - anonymous requests redirect to Clerk sign-in;
@@ -51,5 +60,6 @@ No webhook is required for the walkthrough. Add `CLERK_WEBHOOK_SIGNING_SECRET` o
 - the user menu supports account management and sign-out;
 - incident reads and writes require a Clerk session token;
 - AI requests travel through the authenticated API and use a separate internal service secret;
+- generated drafts appear in 8D investigation history after reload with citations and audit metadata;
 - `/health` reports database readiness;
 - CORS permits only the deployed web origin.
