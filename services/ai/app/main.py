@@ -1,9 +1,14 @@
 from collections import Counter
+import hashlib
 from math import sqrt
+import os
 import re
-from uuid import uuid4
+import secrets
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
@@ -12,6 +17,21 @@ app = FastAPI(
     description="Evidence-first retrieval and 8D investigation drafting.",
     version="0.1.0",
 )
+
+allowed_origins = [origin.strip() for origin in os.getenv("AI_CORS_ORIGIN", "http://localhost:3000").split(",")]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Internal-API-Key"],
+)
+
+
+def verify_internal_api_key(x_internal_api_key: str | None = Header(default=None)) -> None:
+    expected = os.getenv("AI_INTERNAL_API_KEY", "development-only")
+    if not x_internal_api_key or not secrets.compare_digest(x_internal_api_key, expected):
+        raise HTTPException(status_code=401, detail="Invalid service credential.")
 
 
 DOCUMENTS = [
@@ -41,6 +61,11 @@ DOCUMENTS = [
     },
 ]
 
+QDRANT_URL = os.getenv("QDRANT_URL", "").rstrip("/")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "quality_approved_evidence")
+VECTOR_SIZE = 256
+
 
 def tokens(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", value.lower())
@@ -62,6 +87,65 @@ def retrieve(query: str, limit: int = 3) -> list[dict]:
         score = cosine(query_vector, Counter(tokens(searchable)))
         ranked.append({**document, "score": round(score, 4)})
     return sorted(ranked, key=lambda item: item["score"], reverse=True)[:limit]
+
+
+def embedding(value: str) -> list[float]:
+    """Create a stable, dependency-free feature-hashing vector for private evidence."""
+    vector = [0.0] * VECTOR_SIZE
+    for token in tokens(value):
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "big") % VECTOR_SIZE
+        vector[index] += 1.0 if digest[4] % 2 == 0 else -1.0
+    norm = sqrt(sum(item * item for item in vector))
+    return [item / norm for item in vector] if norm else vector
+
+
+def qdrant_headers() -> dict[str, str]:
+    return {"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else {}
+
+
+async def retrieve_from_qdrant(query: str, limit: int = 3) -> list[dict]:
+    if not QDRANT_URL:
+        return retrieve(query, limit)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers=qdrant_headers()) as client:
+            collection = await client.get(f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}")
+            if collection.status_code == 404:
+                created = await client.put(
+                    f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}",
+                    json={"vectors": {"size": VECTOR_SIZE, "distance": "Cosine"}},
+                )
+                created.raise_for_status()
+                points = []
+                for document in DOCUMENTS:
+                    searchable = f"{document['title']} {document['division']} {document['text']}"
+                    points.append({
+                        "id": str(uuid5(NAMESPACE_URL, document["id"])),
+                        "vector": embedding(searchable),
+                        "payload": document,
+                    })
+                indexed = await client.put(
+                    f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points?wait=true",
+                    json={"points": points},
+                )
+                indexed.raise_for_status()
+            else:
+                collection.raise_for_status()
+
+            result = await client.post(
+                f"{QDRANT_URL}/collections/{QDRANT_COLLECTION}/points/query",
+                json={"query": embedding(query), "limit": limit, "with_payload": True},
+            )
+            result.raise_for_status()
+            matches = result.json().get("result", {}).get("points", [])
+            return [
+                {**item["payload"], "score": round(float(item["score"]), 4)}
+                for item in matches
+                if item.get("payload")
+            ]
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=503, detail="Vector evidence service unavailable.") from error
 
 
 class InvestigationRequest(BaseModel):
@@ -88,12 +172,12 @@ class InvestigationResponse(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "healthy", "retriever": "local-evidence-demo"}
+    return {"status": "healthy", "retriever": "qdrant" if QDRANT_URL else "local-evidence-demo"}
 
 
-@app.post("/api/v1/investigations", response_model=InvestigationResponse)
-def investigate(request: InvestigationRequest) -> InvestigationResponse:
-    matches = retrieve(f"{request.division} {request.problem}")
+@app.post("/api/v1/investigations", response_model=InvestigationResponse, dependencies=[Depends(verify_internal_api_key)])
+async def investigate(request: InvestigationRequest) -> InvestigationResponse:
+    matches = await retrieve_from_qdrant(f"{request.division} {request.problem}")
     relevant = [match for match in matches if match["score"] > 0]
     if not relevant:
         raise HTTPException(status_code=422, detail="Insufficient approved evidence for a grounded draft.")

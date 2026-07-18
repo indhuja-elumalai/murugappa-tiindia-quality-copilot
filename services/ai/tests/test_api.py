@@ -15,6 +15,7 @@ def test_health() -> None:
 def test_investigation_is_grounded() -> None:
     response = client.post(
         "/api/v1/investigations",
+        headers={"X-Internal-API-Key": "development-only"},
         json={
             "incident_id": "NCR-1042",
             "division": "Tube Products",
@@ -26,3 +27,15 @@ def test_investigation_is_grounded() -> None:
     assert payload["evidence_status"] == "grounded-draft"
     assert payload["citations"]
     assert "engineer review" in payload["disclaimer"]
+
+
+def test_investigation_rejects_missing_service_credential() -> None:
+    response = client.post(
+        "/api/v1/investigations",
+        json={
+            "incident_id": "NCR-1042",
+            "division": "Tube Products",
+            "problem": "ERW tube weld seam variation above tolerance",
+        },
+    )
+    assert response.status_code == 401

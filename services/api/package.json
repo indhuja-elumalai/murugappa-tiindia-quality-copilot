@@ -9,8 +9,11 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@clerk/express": "^2.1.43",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.6.0",
+    "helmet": "^8.3.0",
     "mongoose": "^8.16.5",
     "zod": "^4.0.10"
   },
